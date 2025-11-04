@@ -1,5 +1,9 @@
 #include "keypad_driver.h"
 
+// Driver de teclado matricial 4x4 con detección por interrupciones.
+// Filas (R1..R4) como salidas; columnas (C1..C4) como entradas con pull-up y EXTI.
+// Al presionar una tecla, la columna cae a nivel bajo (flanco de bajada) y dispara la EXTI.
+
 // Mapa de caracteres del teclado matricial 4x4
 static const char keypad_map[KEYPAD_ROWS][KEYPAD_COLS] = {
   {'1', '2', '3', 'A'},
@@ -10,17 +14,13 @@ static const char keypad_map[KEYPAD_ROWS][KEYPAD_COLS] = {
 
 /**
  * @brief Inicializa el estado del teclado.
- * Configura todas las filas como salidas y las pone en estado BAJO.
- * Esto prepara el teclado para que, al presionar una tecla, se genere
- * una interrupción por flanco de bajada en el pin de la columna correspondiente.
+ * Pone todas las filas en BAJO para que, al presionar, la columna vaya a BAJO
+ * (con pull-up activo) y se dispare la interrupción por flanco de bajada.
+ * Nota: La configuración de pines (salida/entrada/EXTI) la realiza CubeMX.
  * @param keypad Puntero al manejador del teclado.
  */
 void keypad_init(keypad_handle_t* keypad) {
-    // Se asume que los pines ya están configurados como Salida/Entrada en el main.c (CubeMX)
-    // Filas como Salida (Output Push-Pull)
-    // Columnas como Entrada con Pull-up (Input with Pull-up) y configuradas para interrupción externa.
-    
-    // Ponemos todas las filas en BAJO para habilitar la detección de interrupciones en las columnas.
+    // Dejar todas las filas en BAJO para habilitar la detección correcta en columnas
     for (int i = 0; i < KEYPAD_ROWS; i++) {
         HAL_GPIO_WritePin(keypad->row_ports[i], keypad->row_pins[i], GPIO_PIN_RESET);
     }
@@ -40,7 +40,7 @@ char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
     // --- 1. Debounce ---
     // Pequeña espera para evitar rebotes mecánicos del pulsador.
     // Ajuste de debounce a 5 ms para mejorar la respuesta sin perder estabilidad
-    HAL_Delay(50);
+    HAL_Delay(5);
 
     // --- 2. Identificar columna ---
     // Itera sobre los pines de columna para encontrar el índice que corresponde al pin

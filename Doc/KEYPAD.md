@@ -1,120 +1,78 @@
-# Taller: Implementación del Driver de Teclado Hexadecimal
+# Taller: Driver de Teclado Hexadecimal 4x4 (EXTI)
 
-## Introducción
+## Introducci�n
 
-En esta guía, implementaremos un driver para un teclado matricial de 4x4. A diferencia de un simple sondeo (polling) que consume ciclos de CPU constantemente, utilizaremos un método más eficiente y elegante: **interrupciones externas (EXTI)**. Corresponde a la sesión sobre **Teclado**, donde se aplica el manejo de interrupciones para entrada de usuario.
+En esta gu�a implementar�s un driver para un teclado matricial 4x4. En lugar de hacer sondeo continuo (polling), se usan interrupciones externas (EXTI): el micro se activa solo cuando hay una pulsaci�n.
 
-Configuraremos las 4 filas del teclado como salidas y las 4 columnas como entradas con interrupciones. Cuando se presiona una tecla, se conecta una fila (que mantendremos en estado **BAJO**) con una columna (en estado **ALTO** gracias a una resistencia de pull-up). Esto provoca un flanco de bajada en el pin de la columna, lo que dispara una interrupción. Solo entonces nuestro código se activará para determinar exactamente qué tecla fue presionada.
+- Eficiente: el MCU puede hacer otras tareas o dormir.
+- Reactivo: respuesta inmediata a la pulsaci�n.
+- Did�ctico: pr�ctica directa de interrupciones de hardware.
 
-Este enfoque es:
+## 1. Configuraci�n en STM32CubeMX
 
-* **Eficiente**: El microcontrolador puede realizar otras tareas o entrar en modo de bajo consumo mientras espera una pulsación.
-* **Reactivo**: La respuesta a la pulsación es casi inmediata.
-* **Didáctico**: Es una excelente práctica para entender el manejo de interrupciones de hardware.
+### 1.1 Filas (salidas)
 
-## 1. Configuración de Periféricos en STM32CubeMX
+Configura como `GPIO_Output`:
 
-### 1.1 Configuración de Pines de Filas (Salidas)
+- `PA10` ? `KEYPAD_R1`
+- `PB3`  ? `KEYPAD_R2`
+- `PB5`  ? `KEYPAD_R3`
+- `PB4`  ? `KEYPAD_R4`
 
-Configura los siguientes pines como `GPIO_Output`:
+### 1.2 Columnas (entradas con EXTI)
 
-* `PA10` → **User Label:** `KEYPAD_R1`
-* `PB3`  → **User Label:** `KEYPAD_R2`
-* `PB5`  → **User Label:** `KEYPAD_R3`
-* `PB4`  → **User Label:** `KEYPAD_R4`
+Configura como entrada con Pull-Up e interrupci�n por flanco de bajada:
 
-### 1.2 Configuración de Pines de Columnas (Entradas con EXTI)
+- `PB10` ? `KEYPAD_C1`
+- `PA8`  ? `KEYPAD_C2`
+- `PA9`  ? `KEYPAD_C3`
+- `PC7`  ? `KEYPAD_C4`
 
-Configura los siguientes pines como entradas con capacidad de interrupción externa:
+En `System Core > GPIO` para cada columna:
 
-* `PB10` → **User Label:** `KEYPAD_C1`
-* `PA8`  → **User Label:** `KEYPAD_C2`
-* `PA9`  → **User Label:** `KEYPAD_C3`
-* `PC7`  → **User Label:** `KEYPAD_C4`
+- `GPIO mode`: External Interrupt Mode with Falling edge trigger
+- `Pull-up/Pull-down`: Pull-up
 
-En `System Core > GPIO`, para cada pin de columna:
+### 1.3 NVIC
 
-* **GPIO mode:** External Interrupt Mode with Falling edge trigger detection
-* **GPIO Pull-up/Pull-down:** Pull-up
+Habilita:
 
-### 1.3 Habilitar Interrupciones (NVIC)
+- `EXTI line[9:5] interrupts` (PA8, PA9, PC7)
+- `EXTI line[15:10] interrupts` (PB10)
 
-En `System Core > NVIC`, habilita:
+## 2. Librer�a del Teclado
 
-* `EXTI line[9:5] interrupts` (PA8, PA9, PC7)
-* `EXTI line[15:10] interrupts` (PB10)
-
-## 2. Diseño y Creación de la Librería del Teclado
-
-### keypad\_driver.h
+Archivo de cabecera (resumen):
 
 ```c
-#ifndef KEYPAD_DRIVER_H
-#define KEYPAD_DRIVER_H
-
-#include "main.h"
-#include <stdint.h>
-
-#define KEYPAD_ROWS 4
-#define KEYPAD_COLS 4
-
 typedef struct {
-    GPIO_TypeDef* row_ports[KEYPAD_ROWS];
-    uint16_t row_pins[KEYPAD_ROWS];
-    GPIO_TypeDef* col_ports[KEYPAD_COLS];
-    uint16_t col_pins[KEYPAD_COLS];
+    GPIO_TypeDef* row_ports[4];
+    uint16_t row_pins[4];
+    GPIO_TypeDef* col_ports[4];
+    uint16_t col_pins[4];
 } keypad_handle_t;
 
 void keypad_init(keypad_handle_t* keypad);
 char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin);
-
-#endif // KEYPAD_DRIVER_H
 ```
 
-### keypad\_driver.c - Plantilla
+Mapa de teclas (fila�columna): `1 2 3 A / 4 5 6 B / 7 8 9 C / * 0 # D`.
 
-```c
-#include "keypad_driver.h"
+## 3. L�gica de Escaneo
 
-static const char keypad_map[KEYPAD_ROWS][KEYPAD_COLS] = {
-  {'1', '2', '3', 'A'},
-  {'4', '5', '6', 'B'},
-  {'7', '8', '9', 'C'},
-  {'*', '0', '#', 'D'}
-};
+1) Debounce: `HAL_Delay(5);`
+2) Identificar columna: buscar `col_pin` en `keypad->col_pins` y obtener `col_index`.
+3) Identificar fila:
+   - Poner todas las filas en ALTO.
+   - Bajar una fila a la vez y leer la columna.
+   - Si lee BAJO, tecla detectada: `keypad_map[fila][col_index]`.
+   - Esperar liberaci�n (columna vuelva a ALTO) y salir.
+4) Restaurar: llamar a `keypad_init()` para dejar filas en BAJO.
+5) Retornar el car�cter encontrado (o `\0`).
 
-void keypad_init(keypad_handle_t* keypad) {
-    // TAREA: Implementar esta función.
-}
+## 4. Integraci�n en main.c
 
-char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
-    char key_pressed = '\0';
-    // TAREA: Implementar la lógica de escaneo
-    return key_pressed;
-}
-```
-
-## 3. Lógica Detallada del Escaneo
-
-1. **Debounce:** `HAL_Delay(5);`
-2. **Identificar columna:**
-
-   * Itera `col_pins`, compara con `col_pin` para hallar `col_index`.
-3. **Identificar fila:**
-
-   * Pon todas las filas en ALTO
-   * Itera `row_pins`, cada una la pones en BAJO
-   * Lee el pin de columna
-   * Si está en BAJO, has detectado la tecla
-   * Guarda el caracter `keypad_map[row][col_index]`
-   * Espera hasta que se suelte la tecla (vuelva a ser ALTA)
-   * Sal del bucle
-4. **Restaurar:** Llama a `keypad_init()` al final.
-5. **Return:** Devuelve la tecla encontrada.
-
-## 4. Integración en `main.c`
-
-### Includes
+Includes:
 
 ```c
 #include "keypad_driver.h"
@@ -122,63 +80,47 @@ char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
 #include <stdio.h>
 ```
 
-### Variables globales
+Estado global:
 
 ```c
-keypad_handle_t keypad = {
-    .row_ports = {KEYPAD_R1_GPIO_Port, KEYPAD_R2_GPIO_Port, KEYPAD_R3_GPIO_Port, KEYPAD_R4_GPIO_Port},
-    .row_pins  = {KEYPAD_R1_Pin, KEYPAD_R2_Pin, KEYPAD_R3_Pin, KEYPAD_R4_Pin},
-    .col_ports = {KEYPAD_C1_GPIO_Port, KEYPAD_C2_GPIO_Port, KEYPAD_C3_GPIO_Port, KEYPAD_C4_GPIO_Port},
-    .col_pins  = {KEYPAD_C1_Pin, KEYPAD_C2_Pin, KEYPAD_C3_Pin, KEYPAD_C4_Pin}
-};
-
+keypad_handle_t keypad = { /* asigna puertos/pines de filas/columnas */ };
 #define KEYPAD_BUFFER_LEN 16
 uint8_t keypad_buffer[KEYPAD_BUFFER_LEN];
 ring_buffer_t keypad_rb;
 ```
 
-### Callback de interrupción
+Callback EXTI y lazo principal (resumen):
 
 ```c
+volatile uint16_t last_exti_pin = 0;
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    char key = keypad_scan(&keypad, GPIO_Pin);
-    if (key != '\0') {
-        ring_buffer_write(&keypad_rb, (uint8_t)key);
-    }
+    // Enmascarar EXTI y registrar pin para procesar fuera de la ISR
+    HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+    last_exti_pin = GPIO_Pin;
 }
-```
 
-### Dentro de `main()`
-
-```c
-ring_buffer_init(&keypad_rb, keypad_buffer, KEYPAD_BUFFER_LEN);
-keypad_init(&keypad);
-printf("Sistema listo. Esperando pulsaciones del teclado...\r\n");
-
-while (1) {
-    uint8_t key_from_buffer;
-    if (ring_buffer_read(&keypad_rb, &key_from_buffer)) {
-        printf("Tecla presionada: %c\r\n", (char)key_from_buffer);
-    }
+// En el while(1)
+if (last_exti_pin != 0) {
+    char key = keypad_scan(&keypad, last_exti_pin);
+    last_exti_pin = 0;
+    if (key != '\\0') ring_buffer_write(&keypad_rb, (uint8_t)key);
+    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 ```
 
 ## 5. Ejercicio Final
 
-Tu tarea es:
+1) Completa `keypad_init()` y `keypad_scan()`.
+2) Integra los archivos `.h` y `.c`.
+3) Modifica `main.c` e imprime teclas por UART.
+4) Compila, carga y prueba en Nucleo.
+5) Control de acceso: espera 4 teclas, compara con clave y enciende/parpadea LED seg�n resultado.
 
-1. Completar `keypad_init()` y `keypad_scan()`
-2. Integrar los archivos `.h` y `.c`
-3. Modificar `main.c`
-4. Compilar, cargar y probar en tu Nucleo
-5. Implementar control de acceso:
+## Integraci�n al Proyecto
 
-   * Esperar 4 teclas
-   * Verificar contra clave
-   * Encender/parpadear LED según resultado
+El teclado hexadecimal es el principal medio de entrada del sistema �Control de Sala�. Se integra con el `ring_buffer` para manejo as�ncrono y con UART para retroalimentaci�n.
 
-## Integración al Proyecto "Control de Sala"
-
-El teclado hexadecimal será el componente principal de entrada para el sistema de control, permitiendo al usuario ingresar comandos para ajustar temperatura, activar ventilación, etc. Se integrará con el ring buffer para manejo asíncrono.
-
-**Siguiente Paso:** [Uso de una librería existente (Doc/SSD1306.md)](SSD1306.md)
+Siguiente paso: `Doc/SSD1306.md` (display OLED).

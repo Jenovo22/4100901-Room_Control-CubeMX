@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+// Control de LED, comunicación serial y teclado matricial con interrupciones
 #include "led_driver.h"
 #include "ring_buffer.h"
 #include "keypad_driver.h"
@@ -49,12 +50,14 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
+// Último pin de EXTI que interrumpió (se usa fuera de la ISR para escanear el teclado)
 volatile uint16_t last_exti_pin = 0;
 
 // --- INICIO: Código para el Teclado Matricial ---
 
 // 1.1. Definición del manejador del teclado (keypad handle)
 // Asegúrate que los nombres de los puertos y pines coincidan con los de tu main.h
+// Manejador del teclado: puertos y pines de filas/columnas según CubeMX
 keypad_handle_t keypad = {
     .row_ports = {KEYPAD_R1_GPIO_Port, KEYPAD_R2_GPIO_Port, KEYPAD_R3_GPIO_Port, KEYPAD_R4_GPIO_Port},
     .row_pins = {KEYPAD_R1_Pin, KEYPAD_R2_Pin, KEYPAD_R3_Pin, KEYPAD_R4_Pin},
@@ -63,13 +66,14 @@ keypad_handle_t keypad = {
 };
 
 // 1.2. Buffer circular para almacenar las pulsaciones del teclado
+// Buffer circular para teclas: almacena pulsaciones de forma asíncrona
 #define KEYPAD_BUFFER_LEN 16
 uint8_t keypad_buffer[KEYPAD_BUFFER_LEN];
 ring_buffer_t keypad_rb;
 
 // 1.3. Lógica para la clave
 #define PASSWORD_LEN 4
-const char PASSWORD[PASSWORD_LEN] = {'2', '2', '0', '4'}; // Clave secreta
+const char PASSWORD[PASSWORD_LEN] = {'2', '2', '0', '4'}; // Clave secreta (ejemplo)
 char input_buffer[PASSWORD_LEN];
 uint8_t input_index = 0;
 
@@ -167,7 +171,7 @@ int main(void)
   /* USER CODE END 2 */
 
   /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+/* USER CODE BEGIN WHILE */
 while (1)
 {
     // --- 1. Procesar interrupciones pendientes del teclado ---
@@ -186,7 +190,6 @@ while (1)
         }
 
         // Rehabilitar interrupciones del teclado después de procesar
-        HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
         HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
     }
 
@@ -207,11 +210,23 @@ while (1)
         // 4. Si ya se ingresaron los 4 dígitos, verificar la clave
         if (input_index == PASSWORD_LEN)
         {
+            static uint8_t alarma_activada = 0; // 0 = OFF, 1 = ON
+
             if (strncmp(input_buffer, PASSWORD, PASSWORD_LEN) == 0)
             {
-                // CLAVE CORRECTA
-                printf("Clave CORRECTA. LED encendido.\r\n");
-                led_on(&led1); // Encender el LED
+                // CLAVE CORRECTA: alternar estado de la alarma
+                if (!alarma_activada)
+                {
+                    alarma_activada = 1;
+                    printf("Clave CORRECTA. ALARMA ACTIVADA, LED ENCENDIDO.\r\n");
+                    led_on(&led1); // Encender LED
+                }
+                else
+                {
+                    alarma_activada = 0;
+                    printf("Clave CORRECTA. ALARMA DESACTIVADA, LED APAGADO.\r\n");
+                    led_off(&led1); // Apagar LED
+                }
             }
             else
             {
@@ -234,13 +249,10 @@ while (1)
 
     // --- 3. Aquí podrías agregar otras tareas no bloqueantes ---
 }
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-  
+/* USER CODE END WHILE */
+  /* USER CODE BEGIN 3 */
   /* USER CODE END 3 */
 }
-
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -363,23 +375,20 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : KEYPAD_C1_Pin */
-  /* Changed to IT_FALLING to trigger on press (column pulled low by row) */
   GPIO_InitStruct.Pin = KEYPAD_C1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING; // was GPIO_MODE_IT_RISING
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(KEYPAD_C1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : KEYPAD_C4_Pin */
-  /* Changed to IT_FALLING to trigger on press (column pulled low by row) */
   GPIO_InitStruct.Pin = KEYPAD_C4_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING; // was GPIO_MODE_IT_RISING
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(KEYPAD_C4_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : KEYPAD_C2_Pin KEYPAD_C3_Pin */
-  /* Changed to IT_FALLING to trigger on press (column pulled low by row) */
   GPIO_InitStruct.Pin = KEYPAD_C2_Pin|KEYPAD_C3_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING; // was GPIO_MODE_IT_RISING
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -408,10 +417,9 @@ static void MX_GPIO_Init(void)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    // Solo registrar el pin que generó la interrupción
-    // Deshabilitar EXTI 9:5 y 15:10 para evitar reentradas
+    // Enmascarar EXTI y registrar el pin que dispar\u00f3 la interrupci\u00f3n
     HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn); 
     last_exti_pin = GPIO_Pin;
 }
 /* USER CODE END 4 */
