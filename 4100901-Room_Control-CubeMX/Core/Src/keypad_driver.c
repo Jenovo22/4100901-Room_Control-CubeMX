@@ -39,8 +39,8 @@ char keypad_scan(keypad_handle_t* keypad, uint16_t col_pin) {
 
     // --- 1. Debounce ---
     // Pequeña espera para evitar rebotes mecánicos del pulsador.
-    // Ajuste de debounce a 5 ms para mejorar la respuesta sin perder estabilidad
-    HAL_Delay(5);
+    // Ajuste de debounce a 50 ms para mejorar la respuesta sin perder estabilidad
+    HAL_Delay(50);
 
     // --- 2. Identificar columna ---
     // Itera sobre los pines de columna para encontrar el índice que corresponde al pin
