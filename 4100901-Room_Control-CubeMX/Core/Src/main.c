@@ -190,6 +190,7 @@ while (1)
         }
 
         // Rehabilitar interrupciones del teclado después de procesar
+        HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
         HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
     }
 
